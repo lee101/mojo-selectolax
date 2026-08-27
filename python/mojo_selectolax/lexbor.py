@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from html import escape, unescape
+from threading import local
 from typing import Iterator
 
 import numpy as np
@@ -78,6 +79,7 @@ class LexborHTMLParser:
             addr(self._nodes),
             addr(self._attrs),
         )
+        self._result_local = local()
         self._scope_capacities: dict[int, int] = {}
         self._cache: list[LexborNode | None] = [None] * count
         self._is_fragment = is_fragment
@@ -121,10 +123,16 @@ class LexborHTMLParser:
     def inner_html_pretty(self, indent: int = 0, **_: object) -> str:
         return self.inner_html
 
-    def _select_ids(
+    def _plan(self, query: str):
+        if query != getattr(self._result_local, "query", None):
+            self._result_local.query = query
+            self._result_local.plan = compile_selector(query)
+        return self._result_local.plan
+
+    def _select_count(
         self, query: str, scope: int = 0, limit: int | None = None
-    ) -> np.ndarray:
-        plan = compile_selector(query)
+    ) -> tuple[int, np.ndarray]:
+        plan = self._plan(query)
         max_capacity = len(self._nodes)
         if scope:
             max_capacity = self._scope_capacities.get(scope, 0)
@@ -138,7 +146,11 @@ class LexborHTMLParser:
                     raise SelectolaxError("selector returned an invalid subtree size")
                 self._scope_capacities[scope] = max_capacity
         capacity = max_capacity if limit is None else min(limit, max_capacity)
-        result = np.empty(capacity, dtype=np.int64)
+        result_buffer = getattr(self._result_local, "buffer", None)
+        if result_buffer is None or len(result_buffer) < capacity:
+            result_buffer = np.empty(capacity, dtype=np.int64)
+            self._result_local.buffer = result_buffer
+            self._result_local.address = addr(result_buffer)
         source_addr, nodes_addr, attrs_addr = self._addresses
         steps_addr, groups_addr, conditions_addr, values_addr = plan.addresses
         count = int(
@@ -152,17 +164,27 @@ class LexborHTMLParser:
                 len(plan.groups),
                 conditions_addr,
                 values_addr,
-                addr(result),
+                self._result_local.address,
                 capacity,
                 scope,
             )
         )
         if count < 0 or count > capacity:
             raise SelectolaxError("selector returned an invalid result count")
-        return result[:count]
+        return count, result_buffer
+
+    def _select_ids(
+        self, query: str, scope: int = 0, limit: int | None = None
+    ) -> np.ndarray:
+        count, result_buffer = self._select_count(query, scope, limit)
+        return result_buffer[:count]
+
+    def _select_nodes(self, query: str, scope: int = 0) -> list["LexborNode"]:
+        count, result_buffer = self._select_count(query, scope)
+        return [self._node(int(result_buffer[index])) for index in range(count)]
 
     def _select_first_id(self, query: str, scope: int = 0) -> int:
-        plan = compile_selector(query)
+        plan = self._plan(query)
         source_addr, nodes_addr, attrs_addr = self._addresses
         steps_addr, groups_addr, conditions_addr, values_addr = plan.addresses
         node_id = int(
@@ -466,10 +488,7 @@ class LexborNode:
         return self.inner_html
 
     def css(self, query: str) -> list["LexborNode"]:
-        return [
-            self._parser._node(int(index))
-            for index in self._parser._select_ids(query, self._id)
-        ]
+        return self._parser._select_nodes(query, self._id)
 
     def css_first(
         self, query: str, default: object = None, strict: bool = False

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+
 import pytest
 from selectolax.lexbor import LexborHTMLParser as UpstreamParser
 
@@ -245,6 +247,44 @@ def test_scoped_selection_stops_at_scope_boundary():
     assert [node.text() for node in ours_scope.css(".hit")] == [
         node.text() for node in theirs_scope.css(".hit")
     ]
+
+
+def test_selection_scratch_grows_and_reuses_across_scopes():
+    source = (
+        "<main><article><i class='hit'>one</i></article>"
+        "<section><i class='hit'>two</i><i class='hit'>three</i></section></main>"
+    )
+    ours, theirs = LexborHTMLParser(source), UpstreamParser(source)
+    ours_article = ours.css_first("article")
+    theirs_article = theirs.css_first("article")
+    ours_section = ours.css_first("section")
+    theirs_section = theirs.css_first("section")
+
+    assert [node.text() for node in ours_article.css(".hit")] == [
+        node.text() for node in theirs_article.css(".hit")
+    ]
+    assert [node.text() for node in ours_section.css(".hit")] == [
+        node.text() for node in theirs_section.css(".hit")
+    ]
+    assert [node.text() for node in ours_article.css(".hit")] == ["one"]
+
+
+def test_selection_scratch_is_isolated_between_threads():
+    parser = LexborHTMLParser(
+        "<main>" + "".join(
+            f"<i class='group-{index % 2}'>{index}</i>" for index in range(200)
+        ) + "</main>"
+    )
+
+    def select(group: int) -> list[str]:
+        expected = [str(index) for index in range(group, 200, 2)]
+        for _ in range(10):
+            assert [node.text() for node in parser.css(f".group-{group}")] == expected
+        return expected
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(select, (0, 1)))
+    assert len(results[0]) == len(results[1]) == 100
 
 
 def test_node_css_matches_includes_descendant():

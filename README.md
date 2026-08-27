@@ -104,14 +104,14 @@ faster. The benchmark checks result counts before timing.
 
 | case | mojo-selectolax | selectolax 0.4.11 | ratio |
 | --- | ---: | ---: | ---: |
-| parse 1.9 MB document | 9.440 ms | 67.717 ms | 7.17x faster |
-| select `article.product` | 7.452 ms | 13.937 ms | 1.87x faster |
-| select `.featured > a.link` | 4.006 ms | 10.357 ms | 2.59x faster |
-| select `[data-stock='3'] .price` | 4.083 ms | 10.931 ms | 2.68x faster |
-| parse + complex select | 13.036 ms | 93.285 ms | 7.16x faster |
-| first `article.product` | 0.006 ms | 0.010 ms | 1.54x faster |
-| matches `article.product` | 0.006 ms | 0.009 ms | 1.48x faster |
-| scoped select `.price` | 0.014 ms | 0.008 ms | 0.58x slower |
+| parse 1.9 MB document | 8.592 ms | 63.043 ms | 7.34x faster |
+| select `article.product` | 3.121 ms | 9.358 ms | 3.00x faster |
+| select `.featured > a.link` | 1.698 ms | 8.330 ms | 4.90x faster |
+| select `[data-stock='3'] .price` | 2.401 ms | 7.791 ms | 3.24x faster |
+| parse + complex select | 11.366 ms | 73.085 ms | 6.43x faster |
+| first `article.product` | 0.003 ms | 0.006 ms | 1.84x faster |
+| matches `article.product` | 0.003 ms | 0.006 ms | 1.78x faster |
+| scoped select `.price` | 0.005 ms | 0.005 ms | 1.13x faster |
 
 These numbers describe the covered, regular catalog-shaped workload. They are
 not a claim of full HTML5 equivalence.
@@ -138,6 +138,10 @@ crossing the FFI again. A dedicated first-match entry point returns immediately
 without allocating an output array, and scoped list queries size their output
 for the subtree rather than the full document. Python materializes node wrapper
 objects only for matches.
+
+Selection output uses a thread-local NumPy scratch buffer that grows on demand
+and caches its validated FFI address. Repeated queries therefore avoid output
+allocation and address discovery while concurrent queries remain isolated.
 
 All buffers cross the C ABI as integer addresses. The exported Mojo functions
 use `@export("...")` with `abi("C")`, reconstruct
