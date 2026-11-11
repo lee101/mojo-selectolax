@@ -478,8 +478,8 @@ def source_query_equal(
     var i = 0
     if not insensitive:
         while i + W <= source_len:
-            var source_vec = source.load[width=W](source_start + i)
-            var query_vec = query.load[width=W](query_start + i)
+            var source_vec = source.unsafe_load[width=W](source_start + i)
+            var query_vec = query.unsafe_load[width=W](query_start + i)
             if not source_vec.eq(query_vec).reduce_and():
                 return False
             i += W
